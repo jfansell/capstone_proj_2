@@ -1,0 +1,74 @@
+---
+title: "Machine learning - helping to not make \"pour\" decisions"
+author: "John Ansell"
+date: "11/10/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Wine classification and quality prediction
+
+### Introduction  
+
+In 2017 the global consumption of wine was estimated to be 246,000,000 hectolitres[^1]. For reference a hectolitre is 100 litres. A conservative estimate therefore places global wine consumption per capita at approximately 3.2 litres/per person.
+
+This report will make use of the wine quality data sets from the UCI machine learning repository. The data was initially gathered and utilised by Cortez P. and others in: _P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. 
+  Modeling wine preferences by data mining from physicochemical properties.
+  In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236._
+  
+  The data is comprised of two tables, one for red wines and one for white wines. The data sets are exclusively for the _vinho verde_ cultivar from Northern Portugal. The tables consist of eleven different physiochemical components of each wine that was sampled. There is a twelfth variable which is the perceived quality of the wine.
+  
+  That the data is already divided between red and white wines provides an excellent opportunity to deal with two distinct machine learning problems:
+  
+  * Can a machine learning algorithm classify wine as red or white based on the underlying physiochemical measures?
+  * How accurately can a machine learning algorithm predict the perceived quality of a wine based on the underlying physiochemical measures?
+  
+  The second problem outlined above, depending on the success of the binary classification between white and red, will necessarily be carried out as predication problem on white wine and red wine separately; if the physiochemical properties are insufficient to distinguish a red wine from a white wine there would be little point in modeling perceived quality for either type separately.
+  
+### The libraries
+
+There are a number of libraries available in R to facilitate machine learning operations. The caret package, by Max Kuhn, package will be implemented in this report due to it's ease of use and the extensive documentation[^2]. The tidyverse suite of packages will also used.
+
+```{r Check for libraries, message=FALSE, warning=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+```
+\newpage
+After checking for the existence of the libraries, and installing where necessary, on the user's local system, it would now be appropriate to load the required libraries and proceed with retrieving the data for the project.
+
+```{r load libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+```
+
+### The data
+
+The raw data files are downloaded from the UCI Machine learning repository, they are saved in a folder within the current working directory "datasets":
+```{r Download data, message=FALSE, warning=FALSE}
+url_red_wine <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+
+url_white_wine <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+
+download.file(url_red_wine, "datasets/red_wine.csv")
+download.file(url_white_wine, "datasets/white_wine.csv")
+
+rm(url_red_wine)
+rm(url_white_wine)
+```
+
+
+
+  
+
+[^1]: https://www.statista.com/statistics/232937/volume-of-global-wine-consumption/#
+[^2]: https://topepo.github.io/caret/
+
+
