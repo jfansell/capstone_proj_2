@@ -13,9 +13,9 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Wine classification and quality prediction
+# Wine classification and quality prediction
 
-### Introduction  
+## Introduction  
 
 In 2017 the global consumption of wine was estimated to be 246,000,000 hectolitres[^1]. For reference a hectolitre is 100 litres. A conservative estimate therefore places global wine consumption per capita at approximately 3.2 litres/per person.
 
@@ -23,33 +23,49 @@ This report will make use of the wine quality data sets from the UCI machine lea
   Modeling wine preferences by data mining from physicochemical properties.
   In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236._
   
-  The data is comprised of two tables, one for red wines and one for white wines. The data sets are exclusively for the _vinho verde_ cultivar from Northern Portugal. The tables consist of eleven different physiochemical components of each wine that was sampled. There is a twelfth variable which is the perceived quality of the wine.
+The data is comprised of two tables, one for red wines and one for white wines. The data sets are exclusively for the _vinho verde_ cultivar from Northern Portugal. The tables consist of eleven different physiochemical components of each wine that was sampled. There is a twelfth variable which is the perceived quality of the wine.
+
+It must be noted that _vinho verde_ enjoys geographical protection and official certification of _vindo verde_ is under the authority of the CRVV[^2].
   
-  That the data is already divided between red and white wines provides an excellent opportunity to deal with two distinct machine learning problems:
+That the data is already divided between red and white wines provides an excellent opportunity to deal with two distinct machine learning problems:
   
   * Can a machine learning algorithm classify wine as red or white based on the underlying physiochemical measures?
   * How accurately can a machine learning algorithm predict the perceived quality of a wine based on the underlying physiochemical measures?
   
-  The second problem outlined above, depending on the success of the binary classification between white and red, will necessarily be carried out as predication problem on white wine and red wine separately; if the physiochemical properties are insufficient to distinguish a red wine from a white wine there would be little point in modeling perceived quality for either type separately.
-  
-### The libraries
+To address the first question raised we will start with the most simple of binary classifiers - a generalised linear model with a binomial predictor. A random forest will then be implemented. While the ranger and RBorist random forest implementations both offer performance gains over the older randomForest package, the randomForest offers slightly more transparent output in the form of the varImp() function. Overall accuracy will be used as the primary performance metric - the distinction between sensitivity and specificity does not have the significant consequences as one would have in certain other applications of binary classifiers.
 
-There are a number of libraries available in R to facilitate machine learning operations. The caret package, by Max Kuhn, package will be implemented in this report due to it's ease of use and the extensive documentation[^2]. The tidyverse suite of packages will also used.
+The second problem outlined above, depending on the success of the binary classification between white and red, will necessarily be carried out as predication problem on white wine and red wine separately; if the physiochemical properties are insufficient to distinguish a red wine from a white wine there would be little point in modeling perceived quality for either type separately. Once again the modeling process will be started simply with linear models, and move onto to more sophisticated models. Support vector machines were used very successfully in the original work by Cortez _et al._
+  
+## The libraries
+
+There are a number of libraries available in R to facilitate machine learning operations. The caret package, by Max Kuhn, package will be implemented in this report due to it's ease of use and the extensive documentation[^3]. The tidyverse suite of packages will also used.
+
+The machine learning libraries that will be used is the randomForest package for the implementation of random forests and kernlab for the implementation of support vector machines.
 
 ```{r Check for libraries, message=FALSE, warning=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+
+if(!require(kernlab)) install.packages("kernlab", repos = "http://cran.us.r-project.org")
+
 ```
-\newpage
+
 After checking for the existence of the libraries, and installing where necessary, on the user's local system, it would now be appropriate to load the required libraries and proceed with retrieving the data for the project.
 
 ```{r load libraries, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(caret)
+library(ggthemes)
+library(randomForest)
+library(kernlab)
 ```
 
-### The data
+## The data
 
 The raw data files are downloaded from the UCI Machine learning repository, they are saved in a folder within the current working directory "datasets":
 ```{r Download data, message=FALSE, warning=FALSE}
@@ -64,11 +80,105 @@ rm(url_red_wine)
 rm(url_white_wine)
 ```
 
+Reading in the data into the R environment is fairly straight forward:
+```{r Import data, message=FALSE, warning=FALSE}
+red_wine <- read_delim("datasets/red_wine.csv", ";")
+white_wine <- read_delim("datasets/white_wine.csv", ";")
+```
+
+The red wine data set consists of `r nrow(red_wine)` wines and the white wine data set consists of `r nrow(white_wine)` different wines. When we attempt the binary classification into red or white wine, this is something that must be considered as tree based models will tend to "favour" the dominant classes in unbalanced data sets.
+
+Before embarking on a data science misadventure it is important to verify that the physiochemical properties that are recorded are the same for both red and white wine.
+
+```{r Verify data between sets}
+identical(colnames(red_wine), colnames(white_wine))
+```
+### The variables
+
+The eleven physiochemical properties that are measured are:
+```{r Predicator variable names, echo=FALSE}
+colnames(red_wine)[1:11]
+```
+1. "fixed acidity" - acidity in wine is typically divided into fixed acids and volatile acids[^4]. Fixed acids are non-volatile (do not evaporate easily and do not have much impact on smell.) These acids include tartaric, malic and succinic. They are measured in grams per litre.
+2. "volatile acidity" - these are acids which evaporate easily and can have an impact on the smell, or "nose" of a wine. The acid most prevalent in this group is acetic acid. Measured in grams per litre.
+3. "citric acid" - is a measure of the amount of citric acid present in grams per litre.
+4. "residual sugar" - sugar which is abundant in grapes is metabolised by the yeast during during the fermentation process. Residual suagr refers to the sugar remaining after the process is finished. Unit of measure is grams per litre.
+5. "chlorides" - this is a measure of certain mineral salts which are present in all wines. The unit of measure is grams per per litre.
+6. "free sulfur dioxide" - sulphur dioxide is used as a preservative and anti-microbial agent in the fruit industry. Free sulphur dioxide refers to the sulfur dioxide that has not binded with other chemicals in the wine. This is measured in milligrams per litre.
+7. "total sulfur dioxide" - this refers to the total sulfur dioxide added during the wine making process. The required amount depends largely on the pH of the wine[^5]. Measured again in milligrams per litre.
+8. "density" - this refers to the density of the wine. Typically the density of wine is very similar to water. This is measured in grams per cubic centimeter.
+9. "pH" - is a measure of acidity of a wine. The pH scale is generally measured from 0-14 with 0 being very acidic and 14 very basic. While the scale is not bound on either end, this discussion is beyond the scope of this project.
+10. "sulphates" - please see discussion above on six and seven.
+11. "alcohol" - the alcohol content of the wine, expressed as a percentage
+
+The final variable in the data set is the quality. This is measured on a scale of 0-10. The rating is the median score from three assessors who blind taste-test each wine[^6].
+
+### Red vs white
+
+As this project compromises two sections, it would be appropriate to add a column to each wine data set for the colour - red or white and merge the tables into a single, tidy data frame. This will also allow us to exploit the full potential of the ggplot2 package.
+
+```{r Add wine type column and bind}
+red_temp <- red_wine %>%
+  mutate(type = "Red")
+
+white_temp <- white_wine %>%
+  mutate(type = "White")
+
+wine_combined <- bind_rows(white_temp, red_temp)
+
+rm(white_temp, red_temp)
+```
+
+There is now a single combined data set for both red and white wine of size `r nrow(wine_combined)` * `r ncol(wine_combined)`.
+
+Some brief tidying up - converting the wine type to a factor for data visualisation.
+
+```{r wine type to factor}
+wine_combined$type <- as.factor(wine_combined$type)
+```
+
+Now we have done some data adjusting it is time to address an age old question - is white or red better?
+
+```{r Plot quality, echo=FALSE, message=FALSE, warning=FALSE}
+wine_combined %>%
+  ggplot(aes(quality, fill = type)) +
+  geom_density(alpha = 0.4, adjust = 2) + 
+  ggtitle("Density distribution of wine quality") +
+  theme_minimal()
+```
+
+The quality variable is ordinal and not continuous - thus the density distribution is multi-modal. Though the density function suggest that white wines fare better than the red wines.
+
+A better visualisation of the distribution of the "quality" variable would probably be a box plot. This allows for a visual, side-by-side comparison of the variability in the data.
+
+```{r Box plot white vs red, echo=FALSE, message=FALSE, warning=FALSE}
+wine_combined %>%
+  ggplot(aes(type, quality)) +
+  geom_boxplot(aes(colour = type)) +
+  xlab("Wine type") + 
+  ggtitle("Wine rating distribution by wine type") + 
+  theme_minimal()
+```
+Visually the distribution of the quality ratings are almost identical, with the white wine having one further outlier. A brief numeric summary of the salient data for each wine type  should serve to confirm the visual findings:
+
+```{r Quality summary by wine type, message=FALSE, warning=FALSE}
+wine_combined %>%
+  group_by(type) %>%
+  summarise(mean = mean(quality), std_dev = sd(quality), median = median(quality)) %>%
+  knitr::kable()
+```
+
+In terms of quality there is very little to choose between red or white wine. This is a little surprising as the _vinho verde_ cultivar is better known for its white wines.
+
 
 
   
 
 [^1]: https://www.statista.com/statistics/232937/volume-of-global-wine-consumption/#
-[^2]: https://topepo.github.io/caret/
+[^2]: https://www.vinhoverde.pt/en/homepage
+[^3]: https://topepo.github.io/caret/
+[^4]: https://waterhouse.ucdavis.edu/whats-in-wine/fixed-acidity
+[^5]: https://morewinemaking.com/articles/SO2_management
+[^6]: P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236.
 
 
