@@ -3,9 +3,9 @@ title: "Machine learning - helping to not make \"pour\" decisions"
 author: "John Ansell"
 date: "11/10/2020"
 output:
-  pdf_document: default
   html_document:
     df_print: paged
+  pdf_document: default
 ---
 
 
@@ -40,7 +40,7 @@ The second problem outlined above, depending on the success of the binary classi
 
 There are a number of libraries available in R to facilitate machine learning operations. The caret package, by Max Kuhn, package will be implemented in this report due to it's ease of use and the extensive documentation[^3]. The tidyverse suite of packages will also used.
 
-The machine learning libraries that will be used is the randomForest package for the implementation of random forests and kernlab for the implementation of support vector machines.
+The machine learning libraries that will be used is the randomForest package for the implementation of random forests, kernlab for the implementation of non-linear support vector machines and e1071 for linear support vector machines.
 
 ```{r Check for libraries, message=FALSE, warning=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
@@ -51,7 +51,11 @@ if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-pr
 
 if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
 
-if(!require(kernlab)) install.packages("kernlab", repos = "http://cran.us.r-project.org")
+if(!require(MASS)) install.packages("MASS", repos = "http://cran.us.r-project.org")
+
+if(!require(e1071)) install.packages("e1071", repos = "http://cran.us.r-project.org")
+
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
 
 ```
 
@@ -62,7 +66,9 @@ library(tidyverse)
 library(caret)
 library(ggthemes)
 library(randomForest)
-library(kernlab)
+library(MASS)
+library(e1071)
+library(kableExtra)
 ```
 
 ## The data
@@ -88,6 +94,7 @@ white_wine <- read_delim("datasets/white_wine.csv", ";")
 
 The red wine data set consists of `r nrow(red_wine)` wines and the white wine data set consists of `r nrow(white_wine)` different wines. When we attempt the binary classification into red or white wine, this is something that must be considered as tree based models will tend to "favour" the dominant classes in unbalanced data sets.
 
+
 Before embarking on a data science misadventure it is important to verify that the physiochemical properties that are recorded are the same for both red and white wine.
 
 ```{r Verify data between sets}
@@ -112,6 +119,25 @@ colnames(red_wine)[1:11]
 11. "alcohol" - the alcohol content of the wine, expressed as a percentage
 
 The final variable in the data set is the quality. This is measured on a scale of 0-10. The rating is the median score from three assessors who blind taste-test each wine[^6].
+
+
+A brief glimpse at the structure of the numeric data that comprises the eleven predictor variables described above:
+
+\newpage
+```{r Summarise data, warning=FALSE}
+red_wine %>%
+  dplyr::select(-quality) %>%
+  summary() %>%
+  knitr::kable(format = "latex", caption = "Red wine summary data") %>%
+  kableExtra::kable_styling(latex_options = "scale_down")
+
+white_wine %>%
+  dplyr::select(-quality) %>%
+  summary() %>%
+  knitr::kable(format = "latex", caption = "White wine summary data") %>%
+  kableExtra::kable_styling(latex_options = "scale_down")
+```
+
 
 ### Red vs white
 
@@ -147,7 +173,7 @@ wine_combined %>%
   theme_minimal()
 ```
 
-The quality variable is ordinal and not continuous - thus the density distribution is multi-modal. Though the density function suggest that white wines fare better than the red wines.
+The quality variable is ordinal and not continuous - thus the density distribution is multi-modal. Though the density function suggest that white wines fare a little better than the red wines.
 
 A better visualisation of the distribution of the "quality" variable would probably be a box plot. This allows for a visual, side-by-side comparison of the variability in the data.
 
@@ -161,18 +187,325 @@ wine_combined %>%
 ```
 Visually the distribution of the quality ratings are almost identical, with the white wine having one further outlier. A brief numeric summary of the salient data for each wine type  should serve to confirm the visual findings:
 
+
 ```{r Quality summary by wine type, message=FALSE, warning=FALSE}
 wine_combined %>%
   group_by(type) %>%
   summarise(mean = mean(quality), std_dev = sd(quality), median = median(quality)) %>%
-  knitr::kable()
+  knitr::kable() %>%
+  kable_styling(latex_options = "HOLD_position")
 ```
 
-In terms of quality there is very little to choose between red or white wine. This is a little surprising as the _vinho verde_ cultivar is better known for its white wines.
+In terms of perceived quality there is very little to choose between red or white wine. This is a little surprising as the _vinho verde_ cultivar is better known for its white wines. 
+
+### Sugar and alcohol
+
+Alcohol (or more specifically ethanol - alcohol refers to a group of organic compounds) is the second most abundant chemical in wine after water. From the earlier tables we see that in general, for both red and white wine, alcohol content spans from about 8%-14%. The medians and the means for both wine types are close and we therefore assume the alcohol content is normally distributed.
+
+```{r Alcohol content histograms, echo=FALSE, message=FALSE, warning=FALSE}
+wine_combined %>%
+  ggplot(aes(alcohol)) + 
+  geom_histogram() +
+  facet_wrap(~ type, nrow = 1) + 
+  theme_minimal() +
+  ggtitle("Histogram of alcohol content")
+```
+
+The distributions for both red and white wine alcohol content follow a similar shape. Both are right skewed with median values and mean values in the 10.2%-10.5%. There is little to distinguish white wine from red wine in terms of alcohol content. The shape of the histograms do suggest that the assumption of normality is perhaps not entirely accurate, and re-enforces that humans are more visually intuitive than numerically so.
+
+Red wine is generally considered to be a "drier" or less sweet drink than white wine. A brief look at the tables above would suggest that this is down in large part due to the difference in the residual sugar levels.
+
+```{r Residual sugar boxplot, echo=FALSE, message=FALSE, warning=FALSE}
+wine_combined %>%
+  ggplot(aes(type, `residual sugar`, colour = type)) + 
+  geom_boxplot() +
+  ggtitle("Residual sugar by wine type") +
+  xlab("Wine type") +
+  theme_minimal()
+```
+Herein lies the first significant difference between the two wine types. The total inter-quartile range for red wine lies within the second quartile of the amount of residual sugar. The outliers in white wine have some relatively high values - between 20-70 grams per litre. 
+
+### Data conclusions
+
+To document a full exploratory data analysis on the wines data sets in itself could complete a lengthy tome. While there are only eleven features in each data set, the data sets were selected so that more advanced machine learning algorithms would be able to run on a reasonable PC. In the first project the size of the Movielens dataset precluded this approach.
+
+There is no real concern about the "curse of dimensionality"[^7] - eleven feature variables are handled with relative ease by a modern PC. That said a variable which is almost constant with very little deviation will not contribute significantly to any classical regression or machine learning model.
+
+The "density" variable is one such variable which shows very little variation or range.
+```{r Density variability, echo=TRUE}
+wine_combined %>%
+  summarise(min_density = min(density), mean_density = mean(density), sd_density = sd(density), max_density = max(density)) %>%
+  knitr::kable()
+```
+It is evident that the "density" variable is so closely clustered around 1 $g.cm^{-3}$ that the variable can be safely discarded from the data sets before any models are built without fear of this having a detrimental impact on the models.
+
+The variable is easily removed using the following snippet of code.
+```{r Remove density feature, message=FALSE, warning=FALSE}
+red_wine <- red_wine %>%
+  dplyr::select(-density)
+
+white_wine <- white_wine %>%
+  dplyr::select(-density)
+
+wine_combined <- wine_combined %>%
+  dplyr::select(-density)
+```
+
+The data that we will need to tackle the two machine learning problems is now ready, there are three data frames in the global environment:
+
+* wine_combined - this will be used for the binary classification between red and white wine
+* white_wine - this will be used for quality prediction
+* red_wine - this will be used for quality prediction
+
+
+## Techniques - Binary Classification - Red wine or white wine?
+
+In this section of the report an attempt will be made to classify wines as either white or red based on the ten physiochemical measurements outlined earlier (the predictor "density" was removed from the data sets). For this section the only dataframe that will be used is wine_combined which is a joined table of the red and white wines with the wine type added as a factor.
+
+At this stage of the project the outcome "quality" is not of interest and will be removed to not interfere with the modeling process.
+
+```{r remove quality}
+wine_combined <- wine_combined %>%
+  dplyr::select(-quality)
+```
+
+The first step would be to split the data into a training set and a test set. The model will only be trained on the training data. Cross validation, a technique of re-sampling the training data to create validation data sets for tuning the model's parameters.
+
+A brief discussion of the choice how to split the data would be appropriate at this stage. By including too much of the data set in the training data set gives rise to the following complications:
+
+* There is a risk that the model is over-trained on the data fed into it - by passing most of the variability of the predictor variables into a model may lead to the model selecting parameters optimised to fit the training data. But this model could then perform quite poorly on new data.
+* A large training set can be quite computationally troublesome as there is more data to which a model must be fitted. Even sum of least squares regression requires a number of arithmetic steps to prepare. Ensemble machine learning models such as random forests are particularly computationally burdensome during the training process.
+
+There is also a counter argument to all such debates. Having too little data in the training set can have the following drawbacks:
+
+* The outcomes of the models will exhibit much more variability.
+* Predictive performance of any such models will be less reliable and confidence intervals will be accordingly larger.
+
+The overall size of the data sets will also impact the proportion of the data withheld for testing. The Movielens data set had 10,000,000 so the train:test split of 90%:10% still gave a large sample for testing.
+
+While a much smaller data set at 6,497 observations a 90:10 split would in most likelihood lead to over training. Whilst there has been some published research into determining the optimal split[^8], this is not exhaustive. The _Pareto principle_, loosely states that 80% of outcomes can be explained by a mere 20% of the determining factors. 
+
+In conclusion the training:test split will be made at 80%:20%, as this seems appropriate given the trade-offs set out above.
+
+
+### Splitting the data
+
+The first step in any machine learning model would be to partition the data the into training data, on which to "teach" the model and test data, on which to assess the performance of the data. 
+
+The necessarily requires the process be done randomly. In order to ensure reproducibility of the results, the random number generator in R must be given a fixed starting point. In this project the seed used throughout will be 1236[^9].
+
+As discussed earlier the data is unbalanced - there are 4,898 samples of white wine compared to only 1,599 samples of red wine. Merely predicting all wine as red would lead to an overall accuracy of 75.3%. Certain machine learning models will bias inherently for unbiased data.
+
+The function createDataPartition() from the caret package requires the outcome variable as an argument as it automatically performs the balancing in the sampling process. The output of this function is a list of indices that should be used for the training data. The data can be split into training and test data by sub-setting the the output of the function.
+
+```{r Create training and test data sets, message=FALSE, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+
+index <- as.vector(createDataPartition(y = wine_combined$type, times = 1, p = 0.2, list = FALSE))
+
+wine_test <- wine_combined[index,]
+wine_train <- wine_combined[-index,]
+
+rm(index)
+
+```
+
+
+### First model - generalised linear model
+
+As stated in the introduction to this project; each part will be attempted using a basic regression model and then further, more sophisticated models will be fitted.
+
+The first attempt to predict whether a wine is a red wine or a white wine will be dome using a generalised linear model. There is a base function in R glm() which could be used for this, but for consistency we will used the caret interface. Caret also provides for cross validation within the training data to help. This is part of the trainControl argument which is passed to the model training function.
+
+```{r glm model cross fold training, message=FALSE, warning=FALSE}
+tr_Ctrl <- trainControl(method = "cv",
+                        number = 5)
+
+glm_model <- train(type ~ .,
+                   data = wine_train,
+                   method = "glm",
+                   trControl = tr_Ctrl)
+```
+
+Our first model has been trained on the 5,197 randomly selected wines. It would be appropriate to test the model for it's accuracy.
+
+```{r Test glm}
+preds <- predict(glm_model, newdata = wine_test)
+
+(results_glm <- confusionMatrix(wine_test$type, preds))
+```
+Surprisingly the most basic model we could have brought to bear on the problem showed remarkable performance. Only 13 wines out of 1300 were misclassified.
+
+The following code will start to collect the results of the different models for final comparison at a later stage.
+
+```{r Collate results}
+red_white_results <- tibble(model = "GLM", Accuracy = results_glm$overall[1])
+```
 
 
 
-  
+
+### Linear Support Vector Machine
+
+The initial approach when planning this section of the project was to run a basic GLM, laugh at it's poor performance, and introduce some more sophisticated models. Herein does lie a lesson though - complexity is not always the best approach. 
+
+The, unexpected, success of the GLM indicates that a more complex model is perhaps not necessary. A linear SVM will be tuned through the caret interface. The implementation that will be used is the SVM through the e1071 library. 
+
+A brief discussion on parameters and hyperparameters would be in order before proceeding. The parameters of a machine learning model are the final settings based on the predictor variables within the data set. Hyperparameters refer to the external settings of a machine learning algorithm. These can be adjusted to assist the algorithm find an optimal solution for the particular problem that is trying to be solved. This can be achieved through the tuneGrid argument in caret's train() function.
+
+The linear SVM model in the e1071 package only has one hyperparameter to adjust - "cost". 
+
+At first we will use the defaults that caret uses in tuning the model and then explore the impact that different values of cost has on the model.
+
+```{r linear svm model, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+linear_SVM_model <- train(type ~ .,
+                          data = wine_train,
+                          method = "svmLinear2",
+                          type = "C-classification",
+                          trControl = tr_Ctrl)
+```
+
+The default options that caret uses in selecting the best cost parameter are: 0.25, 0.5 and 1. Depending on the accuracy each returns from the cross validation, the best performing option will be selected for the final model.
+
+The plot of the cost parameter vs model accuracy is shown below.
+```{r Plot default cost accuracies, echo=FALSE}
+plot(linear_SVM_model)
+```
+The above plot hints that there is perhaps better accuracy to be gained out of the linear SVM if we were to allow the cost parameter to vary beyond the three default values that caret uses to train the model. For those who prefer a numeric summary of the accuracy for each cost value, the table is below.
+
+```{r Cost accuracy caret default}
+tibble(Cost = linear_SVM_model$results$cost, Accuracy = linear_SVM_model$results$Accuracy) %>%
+  knitr::kable(caption = "Caret default cost hyperparameters") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Before exploring alternative cost options, it would be worth exploring the accuracy of the default model on the test data. 
+
+```{r Linear SVM predictions and assessment}
+preds <- predict(linear_SVM_model, newdata = wine_test)
+(results_SVM <- confusionMatrix(wine_test$type, preds))
+```
+
+The performance is comparable to that GLM, again with only 13 wines out of 1,300 misclassified
+
+```{r Update classifier results}
+red_white_results <- bind_rows(red_white_results, tibble(model = "Linear SVM", Accuracy = results_SVM$overall[1]))
+```
+
+
+We will now try to see if we can extract better performance from the model by exploring wider values of the cost hyperparamater. By using powers of 2 we can examine values from 0.125 to 8 in merely seven iterations of the model.
+
+```{r Tuned grid SVM, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+
+tuned_SVM <- train(type ~ .,
+                   data = wine_test,
+                   method = "svmLinear2",
+                   type = "C-classification",
+                   trControl = tr_Ctrl,
+                   tuneGrid = data.frame(cost = 2^(-3:3)))
+```
+
+This model was trained with the same 5-fold cross validation, but this time using seven values for cost, ranging from 0.125 to 8. The impact of this on the accuracy is seen below.
+
+```{r Plot cost vs accuracy, echo=FALSE}
+plot(tuned_SVM)
+```
+
+The tabulated results for the expanded hyperparameter model:
+
+```{r Tabulate cost vs accuracy}
+tibble(Cost = tuned_SVM$results$cost, Accuracy = tuned_SVM$results$Accuracy) %>%
+  knitr::kable(caption = "Cartesian grid search of cost hyperparamter") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The expanded hyperparameter search revealed a slight improvement (to the third decimal place). This model now needs to be evaluated on the test data to establish if there is any improvement.
+
+```{r Evaluate tuned SVM model}
+preds <- predict(tuned_SVM, newdata = wine_test)
+(results_tuned_SVM <- confusionMatrix(wine_test$type, preds))
+```
+There is some improvement - there are now only eleven wines misclassified, a reduction of two (or optimistically an improvement of 15.3%). As the test data set represents 1,300 wines, an accuracy of 99.15% is quite remarkable.
+
+```{r Append results, include=FALSE}
+red_white_results <- bind_rows(red_white_results, tibble(model = "Tuned linear SVM", Accuracy = results_tuned_SVM$overall[1]))
+```
+
+### Binary classification conlusion
+
+Classification of wine into red and white based on underlying physiochemical properties seems to be an almost trivially easy problem. Even the simplest model performed at close to 100% accuracy. Applying a support vector machine with some minor hyperparameter tuning saw a minor increase in performance.
+
+
+```{r Display results, message=FALSE, warning=FALSE}
+red_white_results %>%
+  knitr::kable(caption = "Binary classifier results") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+This part of the project was inspired by the now infamous experiment where wine students were given white wine dyed to appear red [^10]. The students were unable to distinguish that the wine they were drinking was in fact a white wine and not a red wine. Though it should perhaps be seen as an interaction between our various senses; rather than an outright criticism of wine industry. Criticisms of that study are manifold and can be easily found. 
+
+However, it is unlikely that any blindfolded human could perform as well as any of the binary classifier models outline above when it comes to classifying wines as red or white. In conclusion there is clear underlying physiochemical differences between white wine and red wine that makes their distinction a trivial task for a computer.
+
+It is time to turn to a far more interesting exercise - attempting to predict a wine's quality based on it's underlying physiochemical properties.
+
+\newpage
+
+```{r Global environment housekeeping, message=FALSE, warning=FALSE, include=FALSE}
+#Remove data used in binary classification
+
+rm(wine_combined, wine_test, wine_train, wine_combined)
+rm(glm_model, linear_SVM_model, tuned_SVM)
+rm(results_glm, results_SVM, results_tuned_SVM, red_white_results)
+rm(tr_Ctrl)
+rm(preds)
+
+```
+
+
+## Techniques - Wine quality prediction
+
+This second part of the project is perhaps the more interesting section of the report. We will attempt to predict the quality of the wine based on the underlying phsyiochemical properties. The first part of the project, despite largely being a quest of curiosity inspired by reports that wine experts couldn't distinguish between red and white wine, also had an important role in determining whether there is sufficient phsyiochemical differences between red and white for a computer to distinguish between them. As there is a clear difference, it would be appropriate to attempt to predict quality on white  and red wine separately. The underlying differences between the wines could introduce "noise" to a predictor model and negatively impact on the performance of the model if we were to try predict quality independently of wine type.
+
+Our models built now will be multi-class classifiers as the outcome variable "quality" is ordinal and not a continuous variable. Analogies could be made to the famous MNIST hand written digits data sets.
+
+It would therefore be appropriate to convert the "quality" outcome variable to a factor. This will aid caret in determining the splits between training and test data as well assisting caret with selecting default hyperparameters.
+
+```{r Convert to factors}
+red_wine$quality <- as.factor(red_wine$quality)
+
+white_wine$quality <- as.factor(white_wine$quality)
+```
+
+
+The modelling process will once again begin with a simple model and build up complexity. Unfortunately the glm model is constrained as a binary classifier, so we will need to start off with a slightly more complex base. Proposed models to be used:
+
+* Linear discriminant analysis (LDA). The MASS library will be used for this implementation.
+* Random Forest. The randomForest library will be used despite some of its drawbacks discussed earlier.
+* Linear SVM. The original paper from which this data was sourced _(P Cortez et al.)_ used a linear SVM. As an acknowledgement, it would seem appropriate to see the results produced by a linear SVM.
+
+### Splitting the data
+
+#### Red wine data partitioning
+
+Without going into a long discourse on the splitting of data into training and test set data, it must be acknowledged that the red wine data is considerably smaller with only 1,599 observations. In this case it would perhaps be more appropriate to hold back more data for testing. A 70% training set and 30% test set will be applied.
+
+```{r red wine partition, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+index <- as.vector(createDataPartition(y = red_wine$quality, p = 0.3, list = FALSE))
+
+red_wine_test <- red_wine[index,]
+red_wine_train <- red_wine[-index,]
+
+```
+
+The red wine test set contains `r nrow(red_wine_test)` samples and the training data `r nrow(red_wine_train)`.
+
 
 [^1]: https://www.statista.com/statistics/232937/volume-of-global-wine-consumption/#
 [^2]: https://www.vinhoverde.pt/en/homepage
@@ -180,5 +513,9 @@ In terms of quality there is very little to choose between red or white wine. Th
 [^4]: https://waterhouse.ucdavis.edu/whats-in-wine/fixed-acidity
 [^5]: https://morewinemaking.com/articles/SO2_management
 [^6]: P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236.
+[^7]: A phrase coined by Richard Bellman in: Bellman, Richard Ernest; Rand Corporation (1957). Dynamic programming. Princeton University Press. p. ix. ISBN 978-0-691-07951-6.  
+[^8]: I Guyon; AT & T Bell Laboratories. A Scaling Law for the validation-set training set ratio. http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.33.1337&rep=rep1&type=pdf
+[^9]: 6 is the smallest perfect number. A perfect number is defined as a positive integer whose factors also sum to give the same result ie. 1 x 2 x 3 = 6 = 1 + 2 + 3
+[^10]: https://www.realclearscience.com/blog/2014/08/the_most_infamous_study_on_wine_tasting.html
 
 
