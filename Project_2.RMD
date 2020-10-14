@@ -3,9 +3,9 @@ title: "Machine learning - helping to not make \"pour\" decisions"
 author: "John Ansell"
 date: "11/10/2020"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
-  pdf_document: default
 ---
 
 
@@ -449,11 +449,10 @@ red_white_results %>%
 
 This part of the project was inspired by the now infamous experiment where wine students were given white wine dyed to appear red [^10]. The students were unable to distinguish that the wine they were drinking was in fact a white wine and not a red wine. Though it should perhaps be seen as an interaction between our various senses; rather than an outright criticism of wine industry. Criticisms of that study are manifold and can be easily found. 
 
-However, it is unlikely that any blindfolded human could perform as well as any of the binary classifier models outline above when it comes to classifying wines as red or white. In conclusion there is clear underlying physiochemical differences between white wine and red wine that makes their distinction a trivial task for a computer.
+However, it is unlikely that any blindfolded human could perform as well as any of the binary classifier models outlined above when it comes to classifying wines as red or white. In conclusion there is clear underlying physiochemical differences between white wine and red wine that makes their distinction a trivial task for a computer.
 
 It is time to turn to a far more interesting exercise - attempting to predict a wine's quality based on it's underlying physiochemical properties.
 
-\newpage
 
 ```{r Global environment housekeeping, message=FALSE, warning=FALSE, include=FALSE}
 #Remove data used in binary classification
@@ -490,7 +489,7 @@ The modelling process will once again begin with a simple model and build up com
 
 ### Splitting the data
 
-#### Red wine data partitioning
+#### Red wine data partitioning  
 
 Without going into a long discourse on the splitting of data into training and test set data, it must be acknowledged that the red wine data is considerably smaller with only 1,599 observations. In this case it would perhaps be more appropriate to hold back more data for testing. A 70% training set and 30% test set will be applied.
 
@@ -502,9 +501,108 @@ index <- as.vector(createDataPartition(y = red_wine$quality, p = 0.3, list = FAL
 red_wine_test <- red_wine[index,]
 red_wine_train <- red_wine[-index,]
 
+rm(index)
+
 ```
 
 The red wine test set contains `r nrow(red_wine_test)` samples and the training data `r nrow(red_wine_train)`.
+
+Due to the smaller data set for the red wine and the greater proportion of the data held back for testing, it would be appropriate to allow for greater cross validation in the tuning process. The model training control for the red wine will be cross-fold validation with ten iterations.
+
+```{r train control for red wine}
+train_red_ctrl <- trainControl(method = "cv",
+                               number = 10)
+```
+
+
+#### White wine data splitting  
+
+Splitting the white wine into a test and train partition will be done on the 80% train, and 20% test split as the data set is considerably larger with `r nrow(white_wine)` samples in the data set.
+
+```{r Split white wine, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+index <- as.vector(createDataPartition(y = white_wine$quality, p = 0.2, list = FALSE))
+
+white_wine_test <- white_wine[index,]
+white_wine_train <- white_wine[-index,]
+
+rm(index)
+```
+
+The white wine test set is `r nrow(white_wine_test)` and the training data is a quite hefty `r nrow(white_wine_train)`. This could lead to some model training taking a little longer. The validation of the white wine training set can be reduced in comparison to the red wine.
+
+As there is more data available for the training of the models for white wines, the training controls can be set so to be less computationally onerous as for the red wines. Once again cross validation will be used for training of the models but for this application only 5 fold cross validation will be used.
+
+```{r Train control for white wine}
+train_white_ctrl <- trainControl(method = "cv",
+                                 number = 5)
+```
+
+
+### The first predictive model of wine quality - LDA
+
+A linear discriminant model is as close as we can come to a regression model for a multi-class classifier. A regression model when applied to a binary classification task works to place a plane in hyper-space which minimises the sum of square residuals between the the plane and each observed data point. With multiple possible outcomes this task can no longer be done by minimising the sum of squares of the residuals.
+
+A linear discriminant analysis model is an attempt to generalise linear regression to accommodate multiple outputs. The model we will be using is the LDA from the MASS library. There are no hyperparameters to a LDA model making it a good place from which to start. An LDA is limited, the underlying assumption is the predictors are normally distributed around 0. This means the data will need to be centred and scaled before being passed to the model. Fortunately caret provides a preprocessing option which will allow for normalisation of the data.
+
+
+#### LDA model for red wine quality  
+
+Fitting and training the first model for wine quality is done very simply with the following code.
+
+```{r LDA red wine}
+
+red_wine_lda_model <- train(quality ~ .,
+                            data = red_wine_train,
+                            method = "lda",
+                            trControl = train_red_ctrl,
+                            preProcess = c("center", "scale"))
+
+preds <- predict(red_wine_lda_model, newdata = red_wine_test)
+
+(results_red_LDA <- confusionMatrix(red_wine_test$quality, preds))
+
+```
+The model provides reasonable out of the box performance - an accuracy rate of just beneath 60%. For an LDA model there is no opportunity to tune it further.
+
+```{r Collect results, clear environment, warning=FALSE, include=FALSE}
+quality_results <- tibble(Model = "LDA", Wine_type = "Red", Accuracy = results_red_LDA$overall[1])
+
+rm(red_wine_lda_model, results_red_LDA)
+```
+
+
+#### LDA for white wine quality  
+
+Once again, as for the red wine, the model is quite easily fitted using the interface provided by caret. Obtaining results is also as straightforward.
+
+```{r LDA white wine and predictions, warning=FALSE}
+white_wine_lda <- train(quality ~ .,
+                        data = white_wine_train,
+                        method = "lda",
+                        trControl = train_white_ctrl,
+                        preProcess = c("center", "scale"))
+
+preds <- predict(white_wine_lda, newdata = white_wine_test)
+
+(results_white_lda <- confusionMatrix(white_wine_test$quality, preds))
+```
+Performance of the LDA models was never expected to be particularly fantastic. The white wine LDA model actually faired worse than one would have done by merely taking the average rating from the training set and applying it to the test set.
+
+```{r Update results, clear envir., warning=FALSE, include=FALSE}
+quality_results <- bind_rows(quality_results, tibble(Model = "LDA", Wine_type = "White", Accuracy = results_white_lda$overall[1]))
+
+rm(results_white_lda, white_wine_lda)
+```
+
+
+
+
+
+
+
+
 
 
 [^1]: https://www.statista.com/statistics/232937/volume-of-global-wine-consumption/#

@@ -200,3 +200,61 @@ red_wine$quality <- as.factor(red_wine$quality)
 white_wine$quality <- as.factor(white_wine$quality)
 
 #Partition red wine into training and test data (70:30)
+
+set.seed(1236, sample.kind = "Rounding")
+
+index <- as.vector(createDataPartition(y = red_wine$quality, p = 0.3, list = FALSE))
+
+red_wine_test <- red_wine[index,]
+red_wine_train <- red_wine[-index,]
+
+rm(index) #Is reproducible - will use again for white wine split
+
+##Set up training control for red wine
+train_red_ctrl <- trainControl(method = "cv",
+                               number = 10)
+
+
+##Split white wine data set
+set.seed(1236, sample.kind = "Rounding")
+
+index <- as.vector(createDataPartition(y = white_wine$quality, p = 0.2, list = FALSE))
+
+white_wine_test <- white_wine[index,]
+white_wine_train <- white_wine[-index,]
+
+rm(index)
+
+## Set up training control for white wine
+train_white_ctrl <- trainControl(method = "cv",
+                                 number = 5)
+
+## First LDA on red wine and confusion matrix
+
+red_wine_lda_model <- train(quality ~ .,
+                            data = red_wine_train,
+                            method = "lda",
+                            trControl = train_red_ctrl,
+                            preProcess = c("center", "scale"))
+
+preds <- predict(red_wine_lda_model, newdata = red_wine_test)
+
+(results_red_LDA <- confusionMatrix(red_wine_test$quality, preds))
+
+##Start to collect results and clear old models from environment
+quality_results <- tibble(Model = "LDA", Wine_type = "Red", Accuracy = results_red_LDA$overall[1])
+
+rm(red_wine_lda_model, results_red_LDA)
+
+##LDA on white and the confusion matrix
+white_wine_lda <- train(quality ~ .,
+                        data = white_wine_train,
+                        method = "lda",
+                        trControl = train_white_ctrl,
+                        preProcess = c("center", "scale"))
+
+preds <- predict(white_wine_lda, newdata = white_wine_test)
+
+(results_red_lda <- confusionMatrix(white_wine_test$quality, preds))
+
+##Update results table
