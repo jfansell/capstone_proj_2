@@ -1,7 +1,7 @@
 ---
 title: "Machine learning - helping to not make \"pour\" decisions"
 author: "John Ansell"
-date: "11/10/2020"
+date: "15/10/2020"
 output:
   pdf_document: default
   html_document:
@@ -435,7 +435,7 @@ There is some improvement - there are now only eleven wines misclassified, a red
 red_white_results <- bind_rows(red_white_results, tibble(model = "Tuned linear SVM", Accuracy = results_tuned_SVM$overall[1]))
 ```
 
-### Binary classification conlusion
+### Binary classification conclusion
 
 Classification of wine into red and white based on underlying physiochemical properties seems to be an almost trivially easy problem. Even the simplest model performed at close to 100% accuracy. Applying a support vector machine with some minor hyperparameter tuning saw a minor increase in performance.
 
@@ -470,6 +470,8 @@ rm(preds)
 
 This second part of the project is perhaps the more interesting section of the report. We will attempt to predict the quality of the wine based on the underlying phsyiochemical properties. The first part of the project, despite largely being a quest of curiosity inspired by reports that wine experts couldn't distinguish between red and white wine, also had an important role in determining whether there is sufficient phsyiochemical differences between red and white for a computer to distinguish between them. As there is a clear difference, it would be appropriate to attempt to predict quality on white  and red wine separately. The underlying differences between the wines could introduce "noise" to a predictor model and negatively impact on the performance of the model if we were to try predict quality independently of wine type.
 
+This part of the project is complicated somewhat by the rating process. All the wines are rated as the median score of three experts who blind taste each wine. The use of the median leads to tight clustering of the data. The range in quality is not very large as was seen earlier. This makes distinguishing the outcomes considerably harder than simply classify wine as white or red.
+
 Our models built now will be multi-class classifiers as the outcome variable "quality" is ordinal and not a continuous variable. Analogies could be made to the famous MNIST hand written digits data sets.
 
 It would therefore be appropriate to convert the "quality" outcome variable to a factor. This will aid caret in determining the splits between training and test data as well assisting caret with selecting default hyperparameters.
@@ -485,7 +487,6 @@ The modelling process will once again begin with a simple model and build up com
 
 * Linear discriminant analysis (LDA). The MASS library will be used for this implementation.
 * Random Forest. The randomForest library will be used despite some of its drawbacks discussed earlier.
-* Linear SVM. The original paper from which this data was sourced _(P Cortez et al.)_ used a linear SVM. As an acknowledgement, it would seem appropriate to see the results produced by a linear SVM.
 
 ### Splitting the data
 
@@ -564,9 +565,9 @@ preds <- predict(red_wine_lda_model, newdata = red_wine_test)
 (results_red_LDA <- confusionMatrix(red_wine_test$quality, preds))
 
 ```
-The model provides reasonable out of the box performance - an accuracy rate of just beneath 60%. For an LDA model there is no opportunity to tune it further.
+The model provides reasonable out of the box performance - an accuracy rate of just beneath 60%. For an LDA model there is no opportunity to tune it further. |In the case of red wine there is some predictive power from a LDA model that surpasses the "No information rate". This term is a measure of what one would expect from a classifier with no prior exposure to the data and classified at random.
 
-```{r Collect results, clear environment, warning=FALSE, include=FALSE}
+```{r Collect results LDA, clear environment, warning=FALSE, include=FALSE}
 quality_results <- tibble(Model = "LDA", Wine_type = "Red", Accuracy = results_red_LDA$overall[1])
 
 rm(red_wine_lda_model, results_red_LDA)
@@ -596,13 +597,241 @@ quality_results <- bind_rows(quality_results, tibble(Model = "LDA", Wine_type = 
 rm(results_white_lda, white_wine_lda)
 ```
 
+### Second predictor model for wine quality - random forests
+
+A random forest is an ensemble method for machine learning. It is an extension of the classic decision tree - multiple decision trees are built using a random selection of the feature variables. This allows the classification trees to be smaller (and thus less prone to over training). The number of trees is allowed to grow and is frequently around 500 different trees which "vote" on the final classification. There are a number of random forest implentations available in R. We will use the randomForest package implementation. This has one tuneable hyperparameter - "mtry" the number of variables randomly sampled at each tree split. The default value is the square root of the number of feature variables.
+
+#### Random forest for red wine prediction
+
+Once again caret performs handles the fitting and training of the predictive models with ease. For the initial run the hyperparameter will be left to its default values on which caret trains the models. As this is a stochastic model a seed will need to be specified to obtain reproducible results.
+
+```{r red wine random forest, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+red_wine_rf <- train(quality ~ .,
+                     data = red_wine_train,
+                     method = "rf",
+                     trControl = train_red_ctrl)
+
+preds <- predict(red_wine_rf, newdata = red_wine_test)
+
+(results_red_rf <- confusionMatrix(red_wine_test$quality, preds))
+```
+By default caret only fits three different values for "mtry". The results for the default values are shown below.
+
+```{r Mtry results for default RF}
+red_wine_rf$results[,1:2] %>%
+  knitr::kable(caption = "Default tuning parameters for red wine random forest") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+```{r Collect results def_RF, message=FALSE, warning=FALSE, include=FALSE}
+quality_results <- bind_rows(quality_results, tibble(Model = "Default RF", Wine_type = "Red", Accuracy = results_red_rf$overall[1]))
+```
 
 
+The graph of these these values shows the best value of "mtry" as being 10. However, only three points have been sampled and it is possible that being trying further values between 2-10 that a different local maximum accuracy could be found.
+
+```{r Graph default values of mtry, echo=FALSE, message=FALSE, warning=FALSE}
+ red_wine_rf$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) +
+  geom_point(colour = "red") + 
+  geom_line(colour = "red") + 
+  ggtitle("mTry vs Accuracy in cross-fold validation") +
+  theme_minimal()
+  
+```
+
+```{r Clean up enviroment, message=FALSE, warning=FALSE, include=FALSE}
+rm(red_wine_rf, results_red_rf, preds)
+```
 
 
+To give the model the best chance to find an optimal solution we need to give it more options to try more values of "mtry". We will just allow caret to do a search over all possible values of "mtry"
+
+```{r Expand grid search for RF-red wine, message=FALSE, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+red_wine_tunedRF <- train(quality ~ .,
+                          data = red_wine_train,
+                          method = "rf",
+                          trControl = train_red_ctrl,
+                          tuneGrid = data.frame(mtry = 2:10))
+
+preds <- predict(red_wine_tunedRF, newdata = red_wine_test)
+
+(results_red_wine_tunedRF <- confusionMatrix(red_wine_test$quality, preds))
+
+```
+
+Allowing to caret to iterate over further values of "mtry" resulted in an improved accuracy to just over 70% on the final test set.
+
+The values of mtry and their accuracies obtained during cross validation can be seen below.
+
+```{r mtry values tabulated, echo=FALSE, message=FALSE, warning=FALSE}
+red_wine_tunedRF$results[,1:2] %>%
+  knitr::kable(caption = "Exapnded mtry results") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+A graph depicting these results will show how the accuracy moved around under different values of mtry.
+
+```{r Graph mtry expanded, echo=FALSE}
+red_wine_tunedRF$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) + 
+  geom_point(colour = "darkred") + 
+  geom_line(colour = "darkred") + 
+  ggtitle("Exanded mtry values") +
+  theme_minimal()
+```
+The random forest with further freedom did return better accuracy than the default random forest, although the improvement was not enormously significant.
+
+The advantage of the randomForest implementation of the random forest algorithm is that it is slightly more transparent than other random forest implementations. We can see the importance of each variable to the model.
+
+```{r Variable importance, echo=FALSE}
+varImpPlot(red_wine_tunedRF$finalModel)
+```
+Surprisingly the alcohol content is the most important factor in the random forest model we have built. There is not much separating the remaining physiochemical factors.
+
+```{r Collect results and clear envir., message=FALSE, warning=FALSE, include=FALSE}
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Tuned RF", 
+                                    Wine_type = "Red",
+                                    Accuracy = results_red_wine_tunedRF$overall[1]))
+
+rm(red_wine_tunedRF, preds, results_red_wine_tunedRF)
 
 
+```
 
+#### Random forest for white wine quality prediction
+
+Before proceeding with the modelling process for the white wine, given the poor performance of the LDA, it would be appropriate to amend the training control. The cross validation will be increased to ten fold to give a model better chance to find better solutions. This will add to computational burden.
+
+```{r Update train control for white wine}
+train_white_ctrl <- trainControl(method = "cv",
+                                 number = 10)
+```
+
+As before we will start with a random forest model using the default hyperparameters within caret for the randomForest model implementation. A seed will be passed to the random number generator to ensure reproducibility of results.
+
+```{r Random forest for white wine, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+white_wine_rf <- train(quality ~ .,
+                       data = white_wine_train,
+                       method = "rf",
+                       trControl = train_white_ctrl)
+
+preds <- predict(white_wine_rf, newdata = white_wine_test)
+
+(results_white_rf <- confusionMatrix(white_wine_test$quality, preds))
+```
+
+There is a staggering improvement in performance in terms of accuracy over the LDA model. Total accuracy using the default hyperparameters showed a model accuracy of 69.42%.
+
+```{r Collect results white wine RF, include=FALSE}
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Default RF",
+                                    Wine_type = "White",
+                                    Accuracy = results_white_rf$overall[1]))
+```
+
+A brief look at the accuracy of the cross validation, for each value of mtry used by caret.
+
+```{r Mtry vs accuracy, message=FALSE, warning=FALSE}
+white_wine_rf$results[,1:2] %>%
+  knitr::kable(caption = "Mtry vs cross validation accuracy") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r Graph accuracy vs mtry, echo=FALSE}
+white_wine_rf$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) + 
+  geom_point(colour = "orange") + 
+  geom_line(colour = "orange") + 
+  ggtitle("Cross fold accuracy vs mtry") +
+  theme_minimal()
+```
+
+As we saw when applying an extension of options of the mtry hyperparameter to the random forest for the red wine we were able to improve overall classification performance. We will do likewise now with the white wine.
+
+```{r Clear local storage , include=FALSE}
+rm(white_wine_rf, results_white_rf, preds)
+```
+
+
+We will now proceed to build the random forest with the full range of plausible values of mtry (2-10). This model will take a little while to run depending on the hardware on which it is being executed.
+
+```{r Tuned rf for white wine, warning=FALSE}
+set.seed(1236, sample.kind = "Rounding")
+
+white_wine_tunedRF <- train(quality ~ .,
+                            data = white_wine_train,
+                            method = "rf",
+                            trControl = train_white_ctrl,
+                            tuneGrid = data.frame(mtry = 2:10))
+
+preds <- predict(white_wine_tunedRF, newdata = white_wine_test)
+
+(results_white_tunedRF <- confusionMatrix(white_wine_test$quality, preds))
+```
+
+There has been a marginal improvement in performance. Encourangingly for such a tightly bound data range most values in the confusion matrix are clustered around the main diagonal.
+
+```{r Update results tunedRF white, include=FALSE}
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Tuned RF",
+                                    Wine_type = "White",
+                                    Accuracy = results_white_tunedRF$overall[1]))
+```
+
+A brief overview of how the accuracy profile changed with the additional values passed to "mtry" is set out below.
+
+```{r Tabulate mtry v accuracy}
+white_wine_tunedRF$results[,1:2] %>%
+  knitr::kable(caption = "mTry results 2-10") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r Graph mtry vs accuracy, echo=FALSE}
+white_wine_tunedRF$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) +
+  geom_point(colour = "orange") + 
+  geom_line(colour = "orange") +
+  ggtitle("mTry vs cross validation accuracy") +
+  theme_minimal()
+```
+
+There is a curiosity that arises from the stochastic nature of the random forest algorithms. Both the "default" model and the model which was allowed to tune over the entire range of "mtry" returned the same value of "mtry" (in this instance 2), but due to the random nature of the process the second model performed better on the test data than the first model despite using the same random seed and same hyperparameter values.
+
+```{r Clear local environment, include=FALSE}
+rm(white_wine_tunedRF, results_white_tunedRF, preds)
+```
+
+
+### Quality prediction conclusion
+
+Not unsurprisingly the first attempt to model the quality of a wine using a linear discriminant analysis model was fairly unsuccessful. Though interestingly enough it performed far better in the instance of red wine. As discussed earlier this is a particularly challenging task for machine learning. Only 11 eleven physiochemical predictors were recorded. It is estimated that most wine can contain between 800-1,000 distinct chemicals[^11]. Additional physiochemicals observations may have made this an easier data set to classify.
+
+However given the nature of the range of the quality being so tightly clustered, to have random forest models perform with just shy of 70% accuracy is, in fact, quite remarkable. All the random forest models performed well above the no information rate. The misclassifications were also closely clustered around the main diagonals of the confusion matrices, indicating there were little margins within the classifications.
+
+A summary of the models is set out below.
+```{r Show summary of models}
+quality_results %>%
+  knitr::kable(caption = "Final results") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+## Project conclusions
+
+This project set out to answer two questions:
+
+* Could a computer be trained to distinguish between red and white wine?
+* Could a computer then be trained to predict the quality of a wine?
+
+The first question was shown to be an almost trivial problem for a modern machine learning algorithm. Accuracy obtained on classifying red from white was close to 100%. As mentioned earlier, humans cannot necessarily come close in this regard.
+
+The answer to the second question is a little more subtle and nuanced. A machine learning algorithm definitely performs better than merely taking an average or guessing. The nature of the data does however make extreme accuracy very difficult to achieve. _P. Cortez et al._ suggested an accuracy of 90% was possible with a linear support vector machine. No linear SVM tested was able to perform better than the no information rate. In preparing this report radial SVM's were also explored and they also failed to deliver performance close to the random forests. As alluded to earlier the misclassifications also tended to fall close to the main diagonals of the confusion matrices.
+
+Should machine learning algorithms be used to predict wine quality? The answer to this is almost certainly not - wine, like most things edible, is entirely subjective. it could however, if you happened to have the 11 physiochemical measures of your prospective tipple to hand, give you a broad indication if it would likely be a good or bad wine according to three anonymous judges.
 
 
 [^1]: https://www.statista.com/statistics/232937/volume-of-global-wine-consumption/#
@@ -615,5 +844,6 @@ rm(results_white_lda, white_wine_lda)
 [^8]: I Guyon; AT & T Bell Laboratories. A Scaling Law for the validation-set training set ratio. http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.33.1337&rep=rep1&type=pdf
 [^9]: 6 is the smallest perfect number. A perfect number is defined as a positive integer whose factors also sum to give the same result ie. 1 x 2 x 3 = 6 = 1 + 2 + 3
 [^10]: https://www.realclearscience.com/blog/2014/08/the_most_infamous_study_on_wine_tasting.html
+[^11]: https://www.compoundchem.com/2014/05/28/redwinechemicals
 
 

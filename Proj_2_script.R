@@ -258,3 +258,139 @@ preds <- predict(white_wine_lda, newdata = white_wine_test)
 (results_red_lda <- confusionMatrix(white_wine_test$quality, preds))
 
 ##Update results table
+quality_results <- bind_rows(quality_results, tibble(Model = "LDA", Wine_type = "White", Accuracy = results_white_lda$overall[1]))
+
+rm(results_white_lda, white_wine_lda)
+
+## Default random forest for red wine
+set.seed(1236, sample.kind = "Rounding")
+
+red_wine_rf <- train(quality ~ .,
+                     data = red_wine_train,
+                     method = "rf",
+                     trControl = train_red_ctrl)
+
+preds <- predict(red_wine_rf, newdata = red_wine_test)
+
+(results_red_rf <- confusionMatrix(red_wine_test$quality, preds))
+
+##Tabulate accuracy on CV for default mtry values
+red_wine_rf$results[,1:2]
+
+##Plot default values for mtry
+red_wine_rf$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) +
+  geom_point(colour = "red") + 
+  geom_line(colour = "red") + 
+  ggtitle("mTry vs Accuracy in cross-fold validation") +
+  theme_minimal()
+
+#Update results table
+quality_results <- bind_rows(quality_results, tibble(Model = "Default RF", Wine_type = "Red", Accuracy = results_red_rf$overall[1]))
+
+#Clean environment
+rm(red_wine_rf, results_red_rf, preds)
+
+## Grid search for RF on red wine, and gather results
+set.seed(1236, sample.kind = "Rounding")
+
+red_wine_tunedRF <- train(quality ~ .,
+                          data = red_wine_train,
+                          method = "rf",
+                          trControl = train_red_ctrl,
+                          tuneGrid = data.frame(mtry = 2:10))
+
+preds <- predict(red_wine_tunedRF, newdata = red_wine_test)
+
+(results_red_wine_tunedRF <- confusionMatrix(red_wine_test$quality, preds))
+
+##Tabulate mtry values vs accuracy
+red_wine_tunedRF$results[,1:2]
+
+#Graph above table
+red_wine_tunedRF$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) + 
+  geom_point(colour = "darkred") + 
+  geom_line(colour = "darkred") + 
+  ggtitle("Exanded mtry values") +
+  theme_minimal()
+
+#Gather results
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Tuned RF", 
+                                    Wine_type = "Red",
+                                    Accuracy = results_red_wine_tunedRF$overall[1]))
+
+rm(red_wine_tunedRF, preds, results_red_wine_tunedRF)
+
+##Update training control for white wine 5 fold gave poor results
+train_white_ctrl <- trainControl(method = "cv",
+                                 number = 10)
+##White wine default random forest
+set.seed(1236, sample.kind = "Rounding")
+
+white_wine_rf <- train(quality ~ .,
+                       data = white_wine_train,
+                       method = "rf",
+                       trControl = train_white_ctrl)
+
+preds <- predict(white_wine_rf, newdata = white_wine_test)
+
+(results_white_rf <- confusionMatrix(white_wine_test$quality, preds))
+
+##Collect results
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Default RF",
+                                    Wine_type = "White",
+                                    Accuracy = results_white_rf$overall[1]))
+
+##Summarise default hyperparameter performance
+# Tabular
+white_wine_rf$results[,1:2] %>%
+  knitr::kable(caption = "Mtry vs cross validation accuracy")
+
+#Graphically
+white_wine_rf$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) + 
+  geom_point(colour = "orange") + 
+  geom_line(colour = "orange") + 
+  ggtitle("Cross fold accuracy vs mtry") +
+  theme_minimal()
+
+#Clear environment of redundant information
+rm(white_wine_rf, results_white_rf, preds)
+
+##Cartesian grid search for mtry on white wine data
+set.seed(1236, sample.kind = "Rounding")
+
+white_wine_tunedRF <- train(quality ~ .,
+                            data = white_wine_train,
+                            method = "rf",
+                            trControl = train_white_ctrl,
+                            tuneGrid = data.frame(mtry = 2:10))
+
+preds <- predict(white_wine_tunedRF, newdata = white_wine_test)
+
+(results_white_tunedRF <- confusionMatrix(white_wine_test$quality, preds))
+
+
+##Collect results from tuned RF
+quality_results <- bind_rows(quality_results,
+                             tibble(Model = "Tuned RF",
+                                    Wine_type = "White",
+                                    Accuracy = results_white_tunedRF$overall[1]))
+
+##Show impact of mTry on model accuracy during cross validation
+
+white_wine_tunedRF$results[,1:2] #table
+
+#Graphically
+white_wine_tunedRF$results[,1:2] %>%
+  ggplot(aes(mtry, Accuracy)) +
+  geom_point(colour = "orange") + 
+  geom_line(colour = "orange") +
+  ggtitle("mTry vs cross validation accuracy") +
+  theme_minimal()
+
+##Print model summary
+quality_results
